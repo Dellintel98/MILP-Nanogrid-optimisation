@@ -87,7 +87,8 @@ class Nanogrid:
 
         self.model.market_data = pe.Param(self.model.time_set, self.model.market_set,
                                           initialize=self.market_data.stack().to_dict(), default=0)
-        self.model.pen=0.2/20
+        self.model.pen = 0.2 / 20
+        # self.model.pen = 0.0
         print('Checkpoint 02: Parameters successfully created.', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
     def load_building_data(self, data_year):
@@ -118,6 +119,7 @@ class Nanogrid:
         self.model.P_battery_MAX = pe.Var(domain=pe.NonNegativeReals)
         self.model.P_battery_max = pe.Var(self.model.time_set, domain=pe.NonNegativeReals)
         self.model.Bat_ch_ramp = pe.Var(self.model.time_set, domain=pe.NonNegativeReals)
+
     # noinspection PyUnresolvedReferences
     def set_grid_variables(self):
         self.model.P_grid = pe.Var(self.model.time_set, domain=pe.Reals)
@@ -137,8 +139,7 @@ class Nanogrid:
                                  domain=pe.NonNegativeReals)
         self.model.SOE_ev_relative = pe.Var(self.model.parking_lot_set, self.model.time_set,
                                             domain=pe.NonNegativeReals, bounds=(0, 1))
-        self.m.EV_ch_ramp = pe.Var(self.model.parking_lot_set, self.model.time_set, domain=pe.NonNegativeReals)
-
+        self.model.EV_ch_ramp = pe.Var(self.model.parking_lot_set, self.model.time_set, domain=pe.NonNegativeReals)
 
     # noinspection PyUnresolvedReferences
     def set_costs_variables(self):
@@ -155,8 +156,8 @@ class Nanogrid:
         self.model.C_battery_maintenance = pe.Var(domain=pe.NonNegativeReals)
         self.model.C_pl_maintenance = pe.Var(domain=pe.NonNegativeReals)
 
-        self.model.C_variations_annual= pe.Var(domain=pe.NonNegativeReals)
-        self.model.C_variations= pe.Var(domain=pe.NonNegativeReals)
+        self.model.C_variations_annual = pe.Var(domain=pe.NonNegativeReals)
+        self.model.C_variations = pe.Var(domain=pe.NonNegativeReals)
 
         self.model.C_loan = pe.Var(domain=pe.NonNegativeReals)
         self.model.C_annuity = pe.Var(domain=pe.NonNegativeReals)
@@ -164,22 +165,28 @@ class Nanogrid:
 
     def create_objective(self):
         def objective(model):
-            return model.C_total+model.C_variations
+            return model.C_total + model.C_variations
+
         self.model.objective = pe.Objective(rule=objective, sense=pe.minimize)
 
         def variations_annual(model):
-            return model.C_variations_annual ==  (sum(model.EV_ch_ramp[lot, t] for t in model.time_set for lot in model.parking_lot_set)+sum(model.Bat_ch_ramp[t] for t in model.time_set) )
+            return model.C_variations_annual == (
+                        sum(model.EV_ch_ramp[lot, t] for t in model.time_set for lot in model.parking_lot_set) + sum(
+                    model.Bat_ch_ramp[t] for t in model.time_set))
+
         self.model.variations_annual = pe.Constraint(rule=variations_annual)
 
         def variations_penalization(model):
-            return model.C_variations==sum(model.pen*model.C_variations_annual /(1 + model.components_data["FP_discount_rate"]) ** year for year in model.year_set)
+            return model.C_variations == sum(
+                model.pen * model.C_variations_annual / (1 + model.components_data["FP_discount_rate"]) ** year for year
+                in model.year_set)
 
         self.model.variations_penalization = pe.Constraint(rule=variations_penalization)
 
         def total_costs(model):
             return model.C_total == model.C_invest + model.C_loan + model.C_maintenance + \
-                   model.C_ee_operational + model.C_battery_replacement
-            #  - model.C_profit
+                   model.C_ee_operational + model.C_battery_replacement  # - model.C_profit
+
         self.model.total_costs = pe.Constraint(rule=total_costs)
 
         print('Checkpoint 04: Objective function '
@@ -207,6 +214,7 @@ class Nanogrid:
                                       model.components_data["BS_var_cost_W"] * model.E_battery_capacity +
                                       model.components_data["GC_var_cost"] * model.P_cs_contracted) \
                    * (1 - model.components_data["FP_loan_ratio"])
+
         self.model.total_investment_costs = pe.Constraint(rule=total_investment_costs)
 
         def annuity_costs(model):
@@ -218,11 +226,13 @@ class Nanogrid:
                    * model.components_data["FP_interest_rate"] / \
                    (1 - (1 +
                          model.components_data["FP_interest_rate"]) ** (-1 * model.components_data["FP_payback_time"]))
+
         self.model.annuity_costs = pe.Constraint(rule=annuity_costs)
 
         def loan(model):
             return model.C_loan == sum(model.C_annuity / (1 + model.components_data["FP_discount_rate"]) ** year
                                        for year in model.loan_set)
+
         self.model.loan = pe.Constraint(rule=loan)
 
         print('Checkpoint 05: Investment and loan costs'
@@ -232,28 +242,33 @@ class Nanogrid:
         def pv_system_maintenance_costs(model):
             return model.C_pv_maintenance == model.components_data["SP_var_cost"] * model.P_pv_install \
                    * model.components_data["SP_oper_cost"]
+
         self.model.pv_system_maintenance_costs = pe.Constraint(rule=pv_system_maintenance_costs)
 
         def battery_system_maintenance_costs(model):
             return model.C_battery_maintenance == model.components_data["BS_var_cost_W"] * model.E_battery_capacity \
                    * model.components_data["BS_oper_cost"]
+
         self.model.battery_system_maintenance_costs = pe.Constraint(rule=battery_system_maintenance_costs)
 
         def parking_lot_maintenance_costs(model):
-            return model.C_pl_maintenance == model.components_data["PL_var_cost"] * model.components_data["PL_Nb_lots"]\
+            return model.C_pl_maintenance == model.components_data["PL_var_cost"] * model.components_data["PL_Nb_lots"] \
                    * model.components_data["PL_oper_cost"]
+
         self.model.parking_lot_maintenance_costs = pe.Constraint(rule=parking_lot_maintenance_costs)
 
         def maintenance_costs(model):
             return model.C_maintenance == sum(
                 ((model.C_pv_maintenance + model.C_battery_maintenance + model.C_pl_maintenance) /
                  (1 + model.components_data["FP_discount_rate"]) ** year) for year in model.year_set)
+
         self.model.maintenance_costs = pe.Constraint(rule=maintenance_costs)
 
         def battery_system_replacement_costs(model):
             return model.C_battery_replacement == model.components_data["BS_var_cost_W"] * model.components_data[
                 "BS_replacement_perc"] * model.E_battery_capacity / \
                    (1 + model.components_data["FP_discount_rate"]) ** model.components_data["BS_replacement_year"]
+
         self.model.battery_system_replacement_costs = pe.Constraint(rule=battery_system_replacement_costs)
 
         print('Checkpoint 06: Equipment maintenance and replacement costs'
@@ -264,11 +279,13 @@ class Nanogrid:
             return model.C_ee_operational == sum((model.C_ee_annual * (1 + model.components_data["EP_annual_growth"])
                                                   ** year / (1 + model.components_data["FP_discount_rate"]) ** year)
                                                  for year in model.year_set)
+
         self.model.total_operational_electricity_costs = pe.Constraint(rule=total_operational_electricity_costs)
 
         def annual_electricity_costs(model):
             return model.C_ee_annual == sum(model.C_ee_hourly[t] for t in model.time_set) + \
                    model.components_data["GT_Peak_cost"] * sum(model.P_grid_max[month] for month in model.month_set)
+
         self.model.annual_electricity_costs = pe.Constraint(rule=annual_electricity_costs)
 
         def hourly_electricity_costs(model, t):
@@ -281,6 +298,7 @@ class Nanogrid:
                                model.components_data["GT_LT_cost"] +
                                model.components_data["GT_RES_incentive"])
             return model.C_ee_hourly[t] == c_ee_tariff * model.P_grid_positive[t] * self.dt
+
         self.model.hourly_electricity_costs = pe.Constraint(self.model.time_set, rule=hourly_electricity_costs)
 
         print('Checkpoint 07: Operational costs'
@@ -292,10 +310,12 @@ class Nanogrid:
                                           (1 + model.components_data["EP_annual_growth"]) ** year /
                                           (1 + model.components_data["FP_discount_rate"]) ** year)
                                          for year in model.year_set)
+
         self.model.total_profit = pe.Constraint(rule=total_profit)
 
         def annual_profit(model):
             return model.C_profit_annual == sum(model.C_profit_hourly[t] for t in model.time_set)
+
         self.model.annual_profit = pe.Constraint(rule=annual_profit)
 
         def hourly_profit(model, t):
@@ -304,6 +324,7 @@ class Nanogrid:
             else:
                 tariff_price = model.components_data["EP_LT_cost"]
             return model.C_profit_hourly[t] == 0.8 * tariff_price * model.P_grid_negative[t] * self.dt
+
         self.model.hourly_profit = pe.Constraint(self.model.time_set, rule=hourly_profit)
 
         print('Checkpoint 08: Profit constraints'
@@ -327,14 +348,16 @@ class Nanogrid:
 
         def power_balance_equation(model, t):
             return model.P_grid[t] + model.P_pv[t] + model.P_battery_ds[t] + \
-                   sum(model.P_ev_ds[lot,t] for lot in model.parking_lot_set) * ev_ds_condition \
+                   sum(model.P_ev_ds[lot, t] for lot in model.parking_lot_set) * ev_ds_condition \
                    == \
-                   sum(model.P_ev_ch[lot,t] for lot in model.parking_lot_set) + model.P_battery_ch[t] + \
+                   sum(model.P_ev_ch[lot, t] for lot in model.parking_lot_set) + model.P_battery_ch[t] + \
                    model.P_OD_data[t] * building_inclusion_condition
+
         self.model.power_balance_equation = pe.Constraint(self.model.time_set, rule=power_balance_equation)
 
         def grid_power(model, t):
             return model.P_grid[t] == model.P_grid_positive[t] - model.P_grid_negative[t]
+
         self.model.grid_power = pe.Constraint(self.model.time_set, rule=grid_power)
 
         print('Checkpoint 09: Power balance equation'
@@ -344,19 +367,23 @@ class Nanogrid:
         def monthly_peak_grid_power(model, t):
             return model.P_grid_max[int(model.market_data[t, 'month'])] >= \
                    model.P_grid_positive[t] + model.P_grid_negative[t]
+
         self.model.monthly_peak_grid_power = pe.Constraint(self.model.time_set, rule=monthly_peak_grid_power)
 
         def expected_peak_grid_power(model, t):
             return model.P_grid_max[t] <= model.P_contracted
+
         self.model.expected_peak_grid_power = pe.Constraint(self.model.month_set, rule=expected_peak_grid_power)
 
         if self.model_variant == 1 or self.model_variant == 2:
             def contracted_grid_power(model, t):
                 return model.P_contracted == model.P_cs_contracted
+
             self.model.contracted_grid_power = pe.Constraint(self.model.month_set, rule=contracted_grid_power)
         else:
             def contracted_grid_power(model, t):
                 return model.P_contracted == model.P_cs_contracted + model.components_data["BO_P_contracted_OD"]
+
             self.model.contracted_grid_power = pe.Constraint(self.model.month_set, rule=contracted_grid_power)
 
         # def negative_grid_power(model, t):
@@ -369,10 +396,12 @@ class Nanogrid:
     def create_pv_system_constraints(self):
         def pv_system_power_production(model, t):
             return model.P_pv[t] == model.P_pv_install * model.pv_system_data[t]
+
         self.model.pv_system_power_production = pe.Constraint(self.model.time_set, rule=pv_system_power_production)
 
         def pv_system_optimal_install_power(model):
             return model.P_pv_install <= model.components_data["SP_max_power"] * model.binary_pv
+
         self.model.pv_system_optimal_install_power = pe.Constraint(rule=pv_system_optimal_install_power)
 
         print('Checkpoint 11: PV system constraints'
@@ -381,22 +410,27 @@ class Nanogrid:
     def create_battery_system_constraints(self):
         def battery_charging_power(model, t):
             return model.P_battery_ch[t] <= model.P_battery_max[t]
+
         self.model.battery_charging_power = pe.Constraint(self.model.time_set, rule=battery_charging_power)
 
         def battery_discharging_power(model, t):
             return model.P_battery_ds[t] <= model.P_battery_max[t]
+
         self.model.battery_discharging_power = pe.Constraint(self.model.time_set, rule=battery_discharging_power)
 
         def maximum_battery_capacity(model, t):
             return model.E_battery_capacity <= model.components_data["BS_max_capacity"] * model.binary_battery
+
         self.model.maximum_battery_capacity = pe.Constraint(self.model.time_set, rule=maximum_battery_capacity)
 
         def battery_capacity_lower_bound(model, t):
             return model.E_battery_capacity * model.components_data["BS_DoD"] <= model.E_battery[t]
+
         self.model.battery_capacity_lower_bound = pe.Constraint(self.model.time_set, rule=battery_capacity_lower_bound)
 
         def battery_capacity_upper_bound(model, t):
             return model.E_battery[t] <= model.E_battery_capacity
+
         self.model.battery_capacity_upper_bound = pe.Constraint(self.model.time_set, rule=battery_capacity_upper_bound)
 
         def battery_state_of_energy(model, t):
@@ -408,50 +442,56 @@ class Nanogrid:
                 return model.E_battery[t] == model.E_battery[t - 1] + \
                        (model.P_battery_ch[t] * model.components_data["BS_charging_eff"]
                         - model.P_battery_ds[t] / model.components_data["BS_discharging_eff"]) * self.dt
+
         self.model.battery_state_of_energy = pe.Constraint(self.model.time_set, rule=battery_state_of_energy)
-        
-        def bat_ch_change1(model,t):
-            if t==1:
+
+        def bat_ch_change1(model, t):
+            if t == 1:
                 return pe.Constraint.Skip
             else:
-                return model.P_battery_ch[t]-model.P_battery_ch[ t-1]<=m.Bat_ch_ramp[t]
+                return model.P_battery_ch[t] - model.P_battery_ch[t - 1] <= model.Bat_ch_ramp[t]
+
         self.model.bat_ch_change1 = pe.Constraint(self.model.time_set, rule=bat_ch_change1)
 
-        def bat_ch_change2(model,t):
-            if t==1:
+        def bat_ch_change2(model, t):
+            if t == 1:
                 return pe.Constraint.Skip
             else:
-                return -(model.P_battery_ch[t]-model.P_battery_ch[ t-1])<=m.Bat_ch_ramp[t]
+                return -(model.P_battery_ch[t] - model.P_battery_ch[t - 1]) <= model.Bat_ch_ramp[t]
+
         self.model.bat_ch_change2 = pe.Constraint(self.model.time_set, rule=bat_ch_change2)
 
-        def bat_ds_change1(model,t):
-            if t==1:
+        def bat_ds_change1(model, t):
+            if t == 1:
                 return pe.Constraint.Skip
             else:
-                return model.P_battery_ds[t]-model.P_battery_ds[ t-1]<=m.Bat_ch_ramp[t]
+                return model.P_battery_ds[t] - model.P_battery_ds[t - 1] <= model.Bat_ch_ramp[t]
+
         self.model.bat_ds_change1 = pe.Constraint(self.model.time_set, rule=bat_ds_change1)
 
-        def bat_ds_change2(model,t):
-            if t==1:
+        def bat_ds_change2(model, t):
+            if t == 1:
                 return pe.Constraint.Skip
             else:
-                return -(model.P_battery_ds[t]-model.P_battery_ds[ t-1])<=m.Bat_ch_ramp[t]
+                return -(model.P_battery_ds[t] - model.P_battery_ds[t - 1]) <= model.Bat_ch_ramp[t]
+
         self.model.bat_ds_change2 = pe.Constraint(self.model.time_set, rule=bat_ds_change2)
-
-
 
         def maximum_battery_power(model):
             return model.E_battery_capacity / 4 == model.P_battery_MAX
+
         self.model.maximum_battery_power = pe.Constraint(rule=maximum_battery_power)
 
         def constant_current_mode_battery_power(model, t):
             return model.P_battery_max[t] <= model.P_battery_MAX
+
         self.model.constant_current_mode_battery_power = pe.Constraint(self.model.time_set,
                                                                        rule=constant_current_mode_battery_power)
 
         def constant_voltage_mode_battery_power(model, t):
             return model.P_battery_max[t] <= (model.E_battery_capacity - model.E_battery[t]) / \
                    (4 - 4 * model.components_data["BS_CC_CV_switch"])
+
         self.model.constant_voltage_mode_battery_power = pe.Constraint(self.model.time_set,
                                                                        rule=constant_voltage_mode_battery_power)
 
@@ -461,81 +501,88 @@ class Nanogrid:
     def create_electric_vehicle_constraints(self):
         def ev_state_of_energy_limits(model, lot, t):
             if model.PL_ev_available[t, lot] == 1:
-                return model.E_ev[lot,t] <= model.E_ev_capacity[t, lot]
+                return model.E_ev[lot, t] <= model.E_ev_capacity[t, lot]
             else:
-                return model.E_ev[lot,t] == 0
+                return model.E_ev[lot, t] == 0
+
         self.model.ev_soe_limits = pe.Constraint(self.model.parking_lot_set, self.model.time_set,
                                                  rule=ev_state_of_energy_limits)
 
         if self.model_variant == 1 or self.model_variant == 3:
             def ev_state_of_energy(model, lot, t):
                 if model.PL_ev_arrival[t, lot] == 1:
-                    return model.E_ev[lot,t] == model.E_ev_capacity[t, lot] * model.EV_state_on_arrival[t, lot] \
-                           + (model.P_ev_ch[lot,t] * model.components_data["PL_charging_eff"]) * self.dt
+                    return model.E_ev[lot, t] == model.E_ev_capacity[t, lot] * model.EV_state_on_arrival[t, lot] \
+                           + (model.P_ev_ch[lot, t] * model.components_data["PL_charging_eff"]) * self.dt
                 elif model.PL_ev_available[t, lot] == 1:
-                    return model.E_ev[lot,t] == model.E_ev[lot, t - 1] + \
-                           + (model.P_ev_ch[lot,t] * model.components_data["PL_charging_eff"]) * self.dt
+                    return model.E_ev[lot, t] == model.E_ev[lot, t - 1] + \
+                           + (model.P_ev_ch[lot, t] * model.components_data["PL_charging_eff"]) * self.dt
                 else:
                     return pe.Constraint.Skip
-            self.model.ev_soe = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ev_state_of_energy)            
+
+            self.model.ev_soe = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ev_state_of_energy)
         elif self.model_variant == 2 or self.model_variant == 4:
             def ev_state_of_energy(model, lot, t):
                 if model.PL_ev_arrival[t, lot] == 1:
-                    return model.E_ev[lot,t] == model.E_ev_capacity[t, lot] * model.EV_state_on_arrival[t, lot] \
-                           + (model.P_ev_ch[lot,t] * model.components_data["PL_charging_eff"]
-                              - model.P_ev_ds[lot,t] / model.components_data["PL_discharging_eff"]) * self.dt
+                    return model.E_ev[lot, t] == model.E_ev_capacity[t, lot] * model.EV_state_on_arrival[t, lot] \
+                           + (model.P_ev_ch[lot, t] * model.components_data["PL_charging_eff"]
+                              - model.P_ev_ds[lot, t] / model.components_data["PL_discharging_eff"]) * self.dt
                 elif model.PL_ev_available[t, lot] == 1:
-                    return model.E_ev[lot,t] == model.E_ev[lot, t - 1] + \
-                           + (model.P_ev_ch[lot,t] * model.components_data["PL_charging_eff"]
-                              - model.P_ev_ds[lot,t] / model.components_data["PL_discharging_eff"]) * self.dt
+                    return model.E_ev[lot, t] == model.E_ev[lot, t - 1] + \
+                           + (model.P_ev_ch[lot, t] * model.components_data["PL_charging_eff"]
+                              - model.P_ev_ds[lot, t] / model.components_data["PL_discharging_eff"]) * self.dt
                 else:
                     return pe.Constraint.Skip
+
             self.model.ev_soe = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ev_state_of_energy)
-            
+
             def ch_change3(model, lot, t):
-                if  model.PL_ev_arrival[t, lot] == 1:
+                if model.PL_ev_arrival[t, lot] == 1:
                     return pe.Constraint.Skip
-                elif  model.PL_ev_available[t, lot] == 1:
-                    return model.P_ev_ds[lot,t]-model.P_ev_ds[lot,t-1]<=model.EV_ch_ramp[lot, t]
+                elif model.PL_ev_available[t, lot] == 1:
+                    return model.P_ev_ds[lot, t] - model.P_ev_ds[lot, t - 1] <= model.EV_ch_ramp[lot, t]
                 else:
                     return pe.Constraint.Skip
-            self.m.ch_change3 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change3)
+
+            self.model.ch_change3 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change3)
 
             def ch_change4(model, lot, t):
-                if  model.PL_ev_arrival[t, lot] == 1:
+                if model.PL_ev_arrival[t, lot] == 1:
                     return pe.Constraint.Skip
-                elif  model.PL_ev_available[t, lot] == 1:
-                    return -(model.P_ev_ds[lot,t]-model.P_ev_ds[lot,t-1])<=model.EV_ch_ramp[lot, t]
+                elif model.PL_ev_available[t, lot] == 1:
+                    return -(model.P_ev_ds[lot, t] - model.P_ev_ds[lot, t - 1]) <= model.EV_ch_ramp[lot, t]
                 else:
                     return pe.Constraint.Skip
-            self.m.ch_change4 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change4)
+
+            self.model.ch_change4 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change4)
 
         def ev_relative_state_of_energy(model, lot, t):
             if model.PL_ev_available[t, lot] == 1:
-                return model.SOE_ev_relative[lot,t] == model.E_ev[lot,t] / model.E_ev_capacity[t, lot]
+                return model.SOE_ev_relative[lot, t] == model.E_ev[lot, t] / model.E_ev_capacity[t, lot]
             else:
-                return model.SOE_ev_relative[lot,t] == 0
+                return model.SOE_ev_relative[lot, t] == 0
+
         self.model.ev_relative_soe = pe.Constraint(self.model.parking_lot_set, self.model.time_set,
-                                                   rule=ev_relative_state_of_energy)  
-        
+                                                   rule=ev_relative_state_of_energy)
+
         def ch_change1(model, lot, t):
-            if  model.PL_ev_arrival[t, lot] == 1:
+            if model.PL_ev_arrival[t, lot] == 1:
                 return pe.Constraint.Skip
-            elif  model.PL_ev_available[t, lot] == 1:
-                return model.P_ev_ch[lot,t]-model.P_ev_ch[lot,t-1]<=model.EV_ch_ramp[lot, t]
+            elif model.PL_ev_available[t, lot] == 1:
+                return model.P_ev_ch[lot, t] - model.P_ev_ch[lot, t - 1] <= model.EV_ch_ramp[lot, t]
             else:
                 return pe.Constraint.Skip
-        self.m.ch_change1 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change1)
+
+        self.model.ch_change1 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change1)
 
         def ch_change2(model, lot, t):
-            if  model.PL_ev_arrival[t, lot] == 1:
+            if model.PL_ev_arrival[t, lot] == 1:
                 return pe.Constraint.Skip
-            elif  model.PL_ev_available[t, lot] == 1:
-                return -(model.P_ev_ch[lot,t]-model.P_ev_ch[lot,t-1])<=model.EV_ch_ramp[lot, t]
+            elif model.PL_ev_available[t, lot] == 1:
+                return -(model.P_ev_ch[lot, t] - model.P_ev_ch[lot, t - 1]) <= model.EV_ch_ramp[lot, t]
             else:
                 return pe.Constraint.Skip
-        self.m.ch_change2 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change2)
 
+        self.model.ch_change2 = pe.Constraint(self.model.parking_lot_set, self.model.time_set, rule=ch_change2)
 
         if self.end_soe_equal_to_requested_soe:
             upper_bound = 1
@@ -546,35 +593,39 @@ class Nanogrid:
 
         def ev_relative_end_state_of_energy_upper_bound(model, lot, t):
             if model.PL_ev_departure[t, lot] == 1:
-                return model.SOE_ev_relative[lot,t] <= model.EV_required_end_state[t, lot] * upper_bound
+                return model.SOE_ev_relative[lot, t] <= model.EV_required_end_state[t, lot] * upper_bound
             else:
                 return pe.Constraint.Skip
+
         self.model.ev_relative_end_soe_upper_bound = pe.Constraint(self.model.parking_lot_set, self.model.time_set,
                                                                    rule=ev_relative_end_state_of_energy_upper_bound)
 
         def ev_relative_end_state_of_energy_lower_bound(model, lot, t):
             if model.PL_ev_departure[t, lot] == 1:
-                return model.SOE_ev_relative[lot,t] >= model.EV_required_end_state[t, lot] * lower_bound
+                return model.SOE_ev_relative[lot, t] >= model.EV_required_end_state[t, lot] * lower_bound
             else:
                 return pe.Constraint.Skip
+
         self.model.ev_relative_end_soe_lower_bound = pe.Constraint(self.model.parking_lot_set, self.model.time_set,
                                                                    rule=ev_relative_end_state_of_energy_lower_bound)
 
         def constant_current_mode_ev_charging_power(model, lot, t):
             if model.PL_ev_available[t, lot] == 1:
-                return model.P_ev_ch[lot,t] <= 22
+                return model.P_ev_ch[lot, t] <= 22
             else:
                 return pe.Constraint.Skip
+
         self.model.constant_current_mode_ev_charging_power = pe.Constraint(self.model.parking_lot_set,
                                                                            self.model.time_set,
                                                                            rule=constant_current_mode_ev_charging_power)
 
         def constant_voltage_mode_ev_charging_power(model, lot, t):
             if model.PL_ev_available[t, lot] == 1:
-                return model.P_ev_ch[lot,t] <= 22 * (1 - model.SOE_ev_relative[lot,t]) \
+                return model.P_ev_ch[lot, t] <= 22 * (1 - model.SOE_ev_relative[lot, t]) \
                        / (1 - model.components_data["BS_CC_CV_switch"])
             else:
-                return model.P_ev_ch[lot,t] == 0
+                return model.P_ev_ch[lot, t] == 0
+
         self.model.constant_voltage_mode_ev_charging_power = pe.Constraint(self.model.parking_lot_set,
                                                                            self.model.time_set,
                                                                            rule=constant_voltage_mode_ev_charging_power)
@@ -582,9 +633,10 @@ class Nanogrid:
         if self.model_variant == 2 or self.model_variant == 4:
             def ev_discharging_power(model, lot, t):
                 if model.PL_ev_available[t, lot] == 1:
-                    return model.P_ev_ds[lot,t] <= 22
+                    return model.P_ev_ds[lot, t] <= 22
                 else:
-                    return model.P_ev_ds[lot,t] == 0
+                    return model.P_ev_ds[lot, t] == 0
+
             self.model.ev_discharging_power = pe.Constraint(self.model.parking_lot_set, self.model.time_set,
                                                             rule=ev_discharging_power)
 
@@ -736,7 +788,8 @@ if __name__ == '__main__':
     print('\nLoading data for optimisation process...', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     data = load_data()
 
-    models = [1, 2, 3, 4]
+    # models = [1, 2, 3, 4]
+    models = [4]
     # If = True -> charge electric vehicles to the requested state of energy (soe)
     # If = False -> end soe can have values in range of +/-5% of the requested soe
     # end_soe_to_equal_requested_soe = True
