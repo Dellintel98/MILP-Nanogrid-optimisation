@@ -12,7 +12,7 @@ Solar_plant;SP_oper_cost;%inv;0,02
 Solar_plant;SP_max_power;kW;60
 Battery_storage;BS_fix_cost;€;1000
 Battery_storage;BS_var_cost_P;€/kW;400
-Battery_storage;BS_var_cost_W;€/kWh;400
+Battery_storage;BS_var_cost_W;€/kWh;200
 Battery_storage;BS_oper_cost;%inv;0,02
 Battery_storage;BS_max_power;kW;600
 Battery_storage;BS_max_capacity;kWh;1000
