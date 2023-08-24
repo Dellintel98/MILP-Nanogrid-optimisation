@@ -87,7 +87,7 @@ class Nanogrid:
 
         self.model.market_data = pe.Param(self.model.time_set, self.model.market_set,
                                           initialize=self.market_data.stack().to_dict(), default=0)
-        self.model.pen = 0.2 / 40
+        self.model.pen = 0.2 / 100
         # self.model.pen = 0.0
         print('Checkpoint 02: Parameters successfully created.', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
