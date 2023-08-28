@@ -87,7 +87,7 @@ class Nanogrid:
 
         self.model.market_data = pe.Param(self.model.time_set, self.model.market_set,
                                           initialize=self.market_data.stack().to_dict(), default=0)
-        self.model.pen = 0.2 / 100
+        self.model.pen = 0.2 / 40
         # self.model.pen = 0.0
         print('Checkpoint 02: Parameters successfully created.', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -185,7 +185,7 @@ class Nanogrid:
 
         def total_costs(model):
             return model.C_total == model.C_invest + model.C_loan + model.C_maintenance + \
-                   model.C_ee_operational + model.C_battery_replacement  # - model.C_profit
+                   model.C_ee_operational + model.C_battery_replacement - model.C_profit
 
         self.model.total_costs = pe.Constraint(rule=total_costs)
 
@@ -386,9 +386,9 @@ class Nanogrid:
 
             self.model.contracted_grid_power = pe.Constraint(self.model.month_set, rule=contracted_grid_power)
 
-        # def negative_grid_power(model, t):
-        #     return model.P_grid_negative[t] <= 0.99 * model.P_pv[t]
-        # self.model.negative_grid_power = pe.Constraint(self.model.time_set, rule=negative_grid_power)
+        def negative_grid_power(model, t):
+            return model.P_grid_negative[t] <= model.P_pv[t]
+        self.model.negative_grid_power = pe.Constraint(self.model.time_set, rule=negative_grid_power)
 
         print('Checkpoint 10: Grid constraints'
               ' successfully created.', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -414,7 +414,7 @@ class Nanogrid:
         self.model.battery_charging_power = pe.Constraint(self.model.time_set, rule=battery_charging_power)
 
         def battery_discharging_power(model, t):
-            return model.P_battery_ds[t] <= model.P_battery_max[t]
+            return model.P_battery_ds[t] <= model.P_battery_MAX
 
         self.model.battery_discharging_power = pe.Constraint(self.model.time_set, rule=battery_discharging_power)
 
@@ -489,7 +489,7 @@ class Nanogrid:
                                                                        rule=constant_current_mode_battery_power)
 
         def constant_voltage_mode_battery_power(model, t):
-            return model.P_battery_max[t] <= (model.E_battery_capacity - model.E_battery[t]) / \
+            return model.P_battery_max[t] == (model.E_battery_capacity - model.E_battery[t]) / \
                    (4 - 4 * model.components_data["BS_CC_CV_switch"])
 
         self.model.constant_voltage_mode_battery_power = pe.Constraint(self.model.time_set,
@@ -788,8 +788,8 @@ if __name__ == '__main__':
     print('\nLoading data for optimisation process...', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     data = load_data()
 
-    # models = [1, 2, 3, 4]
-    models = [4]
+    models = [1, 2, 3, 4]
+    # models = [4]
     # If = True -> charge electric vehicles to the requested state of energy (soe)
     # If = False -> end soe can have values in range of +/-5% of the requested soe
     # end_soe_to_equal_requested_soe = True
