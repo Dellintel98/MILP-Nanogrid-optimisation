@@ -87,7 +87,11 @@ class Nanogrid:
 
         self.model.market_data = pe.Param(self.model.time_set, self.model.market_set,
                                           initialize=self.market_data.stack().to_dict(), default=0)
-        self.model.pen = 0.2 / 40
+        # self.model.pen = 0.2 / 40
+        if self.model_variant == 1 or self.model_variant == 2:
+            self.model.pen = 0.2 / 280
+        else:
+            self.model.pen = 0.2 / 80
         # self.model.pen = 0.0
         print('Checkpoint 02: Parameters successfully created.', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -118,6 +122,7 @@ class Nanogrid:
         self.model.P_battery_ds = pe.Var(self.model.time_set, domain=pe.NonNegativeReals)
         self.model.P_battery_MAX = pe.Var(domain=pe.NonNegativeReals)
         self.model.P_battery_max = pe.Var(self.model.time_set, domain=pe.NonNegativeReals)
+        self.model.P_battery_max_ch = pe.Var(self.model.time_set, domain=pe.NonNegativeReals)
         self.model.Bat_ch_ramp = pe.Var(self.model.time_set, domain=pe.NonNegativeReals)
 
     # noinspection PyUnresolvedReferences
@@ -171,8 +176,8 @@ class Nanogrid:
 
         def variations_annual(model):
             return model.C_variations_annual == (
-                        sum(model.EV_ch_ramp[lot, t] for t in model.time_set for lot in model.parking_lot_set) + sum(
-                    model.Bat_ch_ramp[t] for t in model.time_set))
+                        sum(model.EV_ch_ramp[lot, t] for t in model.time_set for lot in model.parking_lot_set) +
+                        sum(model.Bat_ch_ramp[t] for t in model.time_set))
 
         self.model.variations_annual = pe.Constraint(rule=variations_annual)
 
@@ -489,11 +494,18 @@ class Nanogrid:
                                                                        rule=constant_current_mode_battery_power)
 
         def constant_voltage_mode_battery_power(model, t):
-            return model.P_battery_max[t] == (model.E_battery_capacity - model.E_battery[t]) / \
+            return model.P_battery_max[t] <= (model.E_battery_capacity - model.E_battery[t]) / \
                    (4 - 4 * model.components_data["BS_CC_CV_switch"])
 
         self.model.constant_voltage_mode_battery_power = pe.Constraint(self.model.time_set,
                                                                        rule=constant_voltage_mode_battery_power)
+
+        def constant_voltage_trend_battery_power(model, t):
+            return model.P_battery_max_ch[t] == (model.E_battery_capacity - model.E_battery[t]) / \
+                   (4 - 4 * model.components_data["BS_CC_CV_switch"])
+
+        self.model.constant_voltage_trend_battery_power = pe.Constraint(self.model.time_set,
+                                                                        rule=constant_voltage_trend_battery_power)
 
         print('Checkpoint 12: Battery system constraints'
               ' successfully created.', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
@@ -649,7 +661,7 @@ class Nanogrid:
 
         solver = pyomo.opt.SolverFactory('gurobi')
         # tee=True -> see optimisation results in console; tee=False -> don't print the results in the console
-        results = solver.solve(self.model, tee=False, keepfiles=False, options_string="mipgap=0.01 Method=2 MIPFocus=3")
+        results = solver.solve(self.model, tee=True, keepfiles=False, options_string="mipgap=0.01 Method=2 MIPFocus=3")
         # print(results)
 
         if results.solver.status == pyomo.opt.SolverStatus.ok:
@@ -789,6 +801,7 @@ if __name__ == '__main__':
     data = load_data()
 
     models = [1, 2, 3, 4]
+    # models = [1, 2]
     # models = [4]
     # If = True -> charge electric vehicles to the requested state of energy (soe)
     # If = False -> end soe can have values in range of +/-5% of the requested soe
@@ -807,6 +820,7 @@ if __name__ == '__main__':
 
         nanogrid.extract_results()
         nanogrid.save_optimisation_results_to_excel()
+        del nanogrid
 
     print('\n')
     print('Program finished.', datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
